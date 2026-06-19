@@ -6,8 +6,8 @@
 #   check     -> PROVEN / VIOLATED / ERROR              (exit 0 / 1 / 2)
 # Always typecheck first: Apalache cannot check a spec whose Snowcat types fail.
 set -u
-mode=${1:?usage: apalache_check.sh {typecheck|check} <spec.tla> [Inv] [args...]}
-spec=${2:?spec.tla required}
+mode=${1:?usage: apalache_check.sh typecheck SPEC.tla  --or--  apalache_check.sh check SPEC.tla INV [args]}
+spec=${2:?usage: a spec path is required}
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 base=$(basename "$spec")
 case "$mode" in

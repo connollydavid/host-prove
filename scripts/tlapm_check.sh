@@ -6,7 +6,7 @@
 #   ERROR <module>: <msg>                         exit 2
 # `--toolbox 0 0` makes tlapm emit machine-readable per-obligation status.
 set -u
-mod=${1:?usage: tlapm_check.sh <module.tla> [args...]}
+mod=${1:?usage: tlapm_check.sh MODULE.tla [args]}
 shift
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 name=$(basename "$mod" .tla)

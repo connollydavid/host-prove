@@ -55,7 +55,7 @@ mod proofs {
     use super::*;
 
     #[kani::proof]
-    fn <harness_name> {              // <-- the name you disposition as kani:<harness_name>
+    fn <harness_name>() {            // <-- the name you disposition as kani:<harness_name>; KEEP the ()
         let x: <Type> = kani::any(); // a symbolic input — Kani tries ALL values
         kani::assume(<precondition>);// restrict to the inputs the contract covers (P)
         assert!(<property of x>);    // the postcondition Q (or `f(x) == reference(x)`)
@@ -70,8 +70,22 @@ Rules that keep a weak model on the rails:
   `kani::assume(s.len() <= 8)` for strings/slices (Kani needs a finite bound; pick the
   smallest bound that still covers the real cases).
 - **One property per harness.** Split unrelated claims into separate harnesses.
-- For `&str`/`String` inputs, build from a bounded `[u8; N]` of `kani::any()` bytes
-  (e.g. with `kani::assume(bytes.iter().all(|b| b.is_ascii()))`), not an unbounded `String`.
+- **Never `kani::any::<&str>()` or `kani::any::<String>()`** — Kani cannot make an
+  unbounded string symbolic. Build a `&str` from a **bounded `[u8; N]`** of symbolic
+  bytes instead. Use this exact pattern for any function taking `&str`/`&[u8]` — fill
+  only the bytes, the assume, and the assert:
+
+```rust
+    #[kani::proof]
+    fn <harness_name>() {
+        let bytes: [u8; <N>] = kani::any();          // <N> = the smallest length that covers the case
+        kani::assume(bytes.iter().all(|b| b.is_ascii())); // valid UTF-8 so from_utf8 cannot fail
+        // shape the input to the contract's domain, e.g. a leading letter then '.' then a digit:
+        kani::assume(bytes[0].is_ascii_alphabetic() && bytes[1] == b'.' && bytes[2].is_ascii_digit());
+        let s = core::str::from_utf8(&bytes).unwrap();
+        assert!(<property of s>);                    // e.g. !is_dotted_code(s)
+    }
+```
 
 ### Step 3 — Run the wrapper (one command)
 
