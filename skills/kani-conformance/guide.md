@@ -94,8 +94,10 @@ host-prove/scripts/kani_check.sh <harness_name> <crate-dir>
    `<id> => kani:<harness_name>` (replaces a `test:` line when a proof now discharges it).
 2. Ensure the crate's CI runs Kani so the lane is live (see `references` / install). A
    declared `kani:` disposition with **no** Kani CI lane is a HAZARD under
-   `host-lifecycle software --check`. Run `host-lifecycle obligations <spec> --kani <dir>`
-   to confirm the harness name resolves.
+   `host-lifecycle software --check`. Run
+   `host-lifecycle obligations <spec> --prove <crate-dir>` to confirm the harness name
+   resolves — `--prove` sources are checked for `kani:`/`apalache:`/`tlaps:` names exactly
+   as `--tests` is checked for `test:` names.
 
 ## Fix recipes
 
