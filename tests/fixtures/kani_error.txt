@@ -1,0 +1,5 @@
+Kani Rust Verifier
+   Compiling host-lint v0.4.0
+error[E0425]: cannot find value `foo` in this scope
+ --> src/lib.rs:512:18
+error: could not compile `host-lint` (lib) due to 1 previous error

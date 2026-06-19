@@ -1,0 +1,6 @@
+# APALACHE version: 0.47.2
+ > Running Snowcat .::.
+[ParallelScan.tla:42:10-42:24]: Mismatch in argument types. Expected Int, found Str.
+ > Snowcat asks you to fix the types. It might take a while.
+Typing input error: Found a type error
+EXITCODE: ERROR (255)

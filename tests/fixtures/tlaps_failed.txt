@@ -1,0 +1,14 @@
+@!!BEGINMSG
+@!!type:obligation
+@!!id:1
+@!!loc:18:1:18:42
+@!!status:proved
+@!!prover:smt
+@!!ENDMSG
+@!!BEGINMSG
+@!!type:obligation
+@!!id:2
+@!!loc:21:1:21:30
+@!!status:failed
+@!!prover:smt
+@!!ENDMSG

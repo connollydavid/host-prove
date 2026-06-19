@@ -1,0 +1,6 @@
+# APALACHE version: 0.47.2
+PASS #13: BoundedChecker
+Checker reports no error up to computation length 12
+The outcome is: NoError
+It took me 0 days 0 hours 1 min 4 sec
+EXITCODE: OK

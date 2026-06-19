@@ -1,0 +1,6 @@
+# APALACHE version: 0.47.2
+PASS #13: BoundedChecker
+State 4: Check the trace in: _apalache-out/ParallelScan.tla/2026-06-19T10-00-00/violation.tla
+The outcome is: Error
+Checker has found an error
+EXITCODE: ERROR (12)

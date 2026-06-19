@@ -1,0 +1,8 @@
+# APALACHE version: 0.47.2
+PASS #1: SanyParser
+PASS #8: SnowcatTyper
+ > Running Snowcat .::.
+ > Your types are great!
+  Type checker [OK]
+It took me 0 days 0 hours 0 min 2 sec
+EXITCODE: OK

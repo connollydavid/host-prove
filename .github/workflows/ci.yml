@@ -1,0 +1,13 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  verdict-parser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: verdict.py maps tool output to the right verdict (no verifier needed)
+        run: sh tests/run.sh
+      - name: shell + python syntax
+        run: |
+          for f in scripts/*.sh install/*.sh tests/run.sh; do sh -n "$f"; done
+          python3 -c "import py_compile; py_compile.compile('scripts/verdict.py', doraise=True)"
