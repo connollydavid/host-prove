@@ -15,7 +15,9 @@ echo "host-prove: fetching tlaps $ver ..." >&2
 curl -fsSL "$url" -o "$tmp"
 verify_sha "$tmp" "$sha"
 mkdir -p "$dest"
-sh "$tmp" -d "$dest" >/dev/null    # self-extracting installer; -d sets the prefix
+# The .bin is a self-extracting ELF installer with a single option: `-d DIR`.
+chmod +x "$tmp"
+"$tmp" -d "$dest" >/dev/null
 bin="$dest/bin"
 echo "host-prove: tlaps $ver ready ($bin/tlapm)" >&2
 [ -n "${GITHUB_PATH:-}" ] && echo "$bin" >> "$GITHUB_PATH"   # CI matrix
