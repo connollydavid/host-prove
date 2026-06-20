@@ -6,7 +6,7 @@ tests + trace conformance). You write a small proof harness, run it through one
 wrapper command, and act on a single verdict word.
 
 This workflow is built to run with a **small/weak model**. You never read raw Kani
-output and you never invent a proof: you fill a template, run `kani_check.sh`, and
+output and you never invent a proof: you fill a template, run `host-prove kani`, and
 match its one-line verdict in the table below. If a step is not on the path, STOP.
 
 ## Input / Output
@@ -27,7 +27,7 @@ the filesystem, threads, or unbounded loops is **out of scope** — say so and s
 
 ## The only verdict vocabulary
 
-`kani_check.sh` prints exactly one line. Match on the first word:
+`host-prove kani` prints exactly one line. Match on the first word:
 
 | Verdict | Meaning | Exit |
 |---|---|---|
@@ -94,11 +94,14 @@ Rules that keep a weak model on the rails:
     }
 ```
 
-### Step 3 — Run the wrapper (one command)
+### Step 3 — Run it (one command)
 
 ```sh
-host-prove/scripts/kani_check.sh <harness_name> <crate-dir>
+host-prove kani --harness <harness_name> --dir <crate-dir>
 ```
+
+`host-prove` runs `cargo kani` itself and prints one verdict line — you never pipe or
+parse. (Optional bound: `--bound unwind=<K>`.)
 
 ### Step 4 — Act on the verdict (do exactly this)
 
@@ -133,4 +136,4 @@ host-prove/scripts/kani_check.sh <harness_name> <crate-dir>
 - The harness is `#[cfg(kani)]`-gated. No exceptions — an ungated harness pulls the
   `kani` crate into the normal build and breaks the reproducible artifact.
 - A `FAILED` verdict is never "fixed" by editing the assertion. Fix the code or report.
-- One command per run (`kani_check.sh`); never hand-parse `cargo kani` output.
+- One command per run (`host-prove kani`); never hand-parse `cargo kani` output.

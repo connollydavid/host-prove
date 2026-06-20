@@ -26,7 +26,7 @@ buffers may exceed Apalache — if `--length` cannot be made meaningful, say so 
 
 ## The only verdict vocabulary
 
-`apalache_check.sh` prints exactly one line. Match on the first word:
+`host-prove apalache` prints exactly one line. Match on the first word:
 
 | Verdict | Meaning | Exit |
 |---|---|---|
@@ -41,7 +41,7 @@ buffers may exceed Apalache — if `--length` cannot be made meaningful, say so 
 ### Step 1 — Type-check (gate)
 
 ```sh
-host-prove/scripts/apalache_check.sh typecheck <spec.tla>
+host-prove apalache --mode typecheck --spec <spec.tla>
 ```
 
 | Verdict | Do |
@@ -57,7 +57,7 @@ line **above** the declaration. This is mechanical — do not change the spec's 
 ### Step 2 — Symbolic check
 
 ```sh
-host-prove/scripts/apalache_check.sh check <spec.tla> <Inv> --length=<N> [--init=Init --next=Next --cinit=CInit]
+host-prove apalache --mode check --spec <spec.tla> --inv <Inv> --bound length=<N>
 ```
 
 Pick `<N>` = the longest run that could first violate the invariant (often the spec's

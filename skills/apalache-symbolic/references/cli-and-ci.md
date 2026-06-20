@@ -10,10 +10,13 @@
 Other useful flags: `--smt-solver=z3|cvc5`, `--cinit=CInit` (symbolic constant bounds —
 this is what makes the result parametric), `--run-dir=DIR`, `--length=N` (default 10).
 
-Always prefer the host-prove wrappers (`scripts/apalache_check.sh`) over calling
-`apalache-mc` directly — the wrapper normalizes flags and parses the verdict to one line.
+Always use `host-prove apalache` over calling `apalache-mc` directly — host-prove runs it
+with normalized flags and parses the verdict to one line (no shell pipe to assemble).
 
 ## CI lane (OS matrix; official prebuilt binary, no Docker)
+
+Wireable in **any** software repo — no host-relative paths: `host-prove` comes from
+`cargo install`, the pinned Apalache from host-prove's own installer (cloned, not `./tools/…`):
 
 ```yaml
 apalache:
@@ -24,9 +27,13 @@ apalache:
     - uses: actions/checkout@v4
     - uses: actions/setup-java@v4
       with: { distribution: temurin, java-version: '17' }
-    - run: ./tools/host-prove/install/install-apalache.sh   # version + SHA256 pinned
-    - run: ./tools/host-prove/scripts/apalache_check.sh typecheck path/to/Spec.tla
-    - run: ./tools/host-prove/scripts/apalache_check.sh check path/to/Spec.tla MyInv --length=12
+    - name: install host-prove + the pinned Apalache
+      run: |
+        cargo install --git https://github.com/connollydavid/host-prove --locked
+        git clone --depth 1 https://github.com/connollydavid/host-prove /tmp/host-prove
+        /tmp/host-prove/install/install-apalache.sh   # version + SHA256 pinned
+    - run: host-prove apalache --mode typecheck --spec path/to/Spec.tla
+    - run: host-prove apalache --mode check --spec path/to/Spec.tla --inv MyInv --bound length=12
 ```
 
 The literal `apalache-mc` string in this workflow is what `host-lifecycle software --check`

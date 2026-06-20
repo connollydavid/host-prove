@@ -1,15 +1,16 @@
 #!/bin/sh
-# Validate scripts/verdict.py against captured tool-output fixtures. Needs no
+# Validate the host-prove binary against captured tool-output fixtures. Needs no
 # verifier installed — it proves the parser maps real tool output to the right
 # one-line verdict + exit code, which is what the skills rely on for weak models.
+# Needs `host-prove` on PATH (CI puts target/release on PATH; or `cargo install`).
 set -u
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-V="$here/../scripts/verdict.py"
+V=host-prove
 pass=0; fail=0
 
-run() {  # <fixture> <expect_code> <expect_prefix> -- <verdict.py args...>
+run() {  # <fixture> <expect_code> <expect_prefix> -- <host-prove args...>
   fixture=$1; expect_code=$2; expect=$3; shift 3; [ "$1" = "--" ] && shift
-  got=$(python3 "$V" "$@" < "$here/fixtures/$fixture"); code=$?
+  got=$("$V" "$@" --stdin < "$here/fixtures/$fixture"); code=$?
   case "$got" in
     "$expect"*) line_ok=1 ;;
     *) line_ok=0 ;;

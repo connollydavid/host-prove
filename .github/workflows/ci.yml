@@ -5,9 +5,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: verdict.py maps tool output to the right verdict (no verifier needed)
-        run: sh tests/run.sh
-      - name: shell + python syntax
-        run: |
-          for f in scripts/*.sh install/*.sh tests/run.sh; do sh -n "$f"; done
-          python3 -c "import py_compile; py_compile.compile('scripts/verdict.py', doraise=True)"
+      - name: host-prove maps tool output to the right verdict (unit tests, no verifier needed)
+        run: cargo test --locked
+      - name: clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: build the binary
+        run: cargo build --release --locked
+      - name: fixtures map to the right verdict via the built binary
+        run: PATH="$PWD/target/release:$PATH" sh tests/run.sh
+      - name: shell syntax (installers + test runner)
+        run: for f in install/*.sh tests/run.sh; do sh -n "$f"; done

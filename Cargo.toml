@@ -1,0 +1,10 @@
+[package]
+name = "host-prove"
+version = "0.2.0"
+edition = "2021"
+description = "Parse a verifier's raw output into one machine-matchable verdict line + bound (host-prove lane driver)"
+license = "Unlicense"
+
+[[bin]]
+name = "host-prove"
+path = "src/main.rs"

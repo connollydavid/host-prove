@@ -25,7 +25,7 @@ genuinely must-hold-for-all properties.
 
 ## The only verdict vocabulary
 
-`tlapm_check.sh` prints exactly one line. Match on the first word:
+`host-prove tlaps` prints exactly one line. Match on the first word:
 
 | Verdict | Meaning | Exit |
 |---|---|---|
@@ -38,7 +38,7 @@ genuinely must-hold-for-all properties.
 ### Step 1 — Run the proof checker (one command)
 
 ```sh
-host-prove/scripts/tlapm_check.sh <module.tla>
+host-prove tlaps --module <module.tla>
 ```
 
 ### Step 2 — Act on the verdict

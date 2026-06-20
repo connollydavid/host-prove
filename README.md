@@ -32,18 +32,19 @@ declaring it costs nothing.
 Each skill is procedural, not reasoning-heavy: one exact wrapper command per step, a
 fixed verdict vocabulary the agent matches on (never raw tool output), decision tables
 with explicit STOP conditions, and fill-in templates instead of open-ended authoring.
-`scripts/verdict.py` is the single parser that all three wrappers pipe through;
-`tests/run.sh` proves it maps real tool output to the right verdict with no verifier
-installed. (Authoring a *new* TLAPS proof is the one genuinely reasoning-heavy task — the
+the `host-prove` binary (Rust, `cargo install`) is the single verdict+bound parser all
+three wrappers pipe through; `cargo test` / `tests/run.sh` prove it maps real tool output
+to the right verdict with no verifier installed. (Authoring a *new* TLAPS proof is the one genuinely reasoning-heavy task — the
 `tlaps-proof` skill scopes a weak model to running and maintaining existing proofs and
 flags authoring as strong-model work.)
 
 ## Reproducible install — like our Rust
 
-`install/*.sh` fetch each tool's **official prebuilt binary**, pinned to an exact version
-and verified against the SHA256 recorded in `tools.lock`, then expose it on PATH. No
-Docker, no OCaml build. Re-running reproduces the identical verified binary — the analog
-of `.host-software`'s digest-pinned toolchain + recorded artifact hash. The tools are
+`install/*.sh` pin each tool to an exact version in `tools.lock` and expose it on PATH.
+Apalache and TLAPS are **official prebuilt binaries**, SHA256-verified against `tools.lock`;
+**Kani is a cargo-locked source build** (`cargo install --locked`, `sha256=n/a`) — not a
+SHA256-verified binary. No Docker, no OCaml build. Re-running reproduces the identical
+verified install — the analog of `.host-software`'s digest-pinned toolchain. The tools are
 cross-platform enough to gate via a CI OS matrix (Apalache + Kani on ubuntu/macos;
 Apalache also windows; TLAPS on its Linux prebuilt installer).
 
@@ -51,10 +52,10 @@ Apalache also windows; TLAPS on its Linux prebuilt installer).
 
 ```
 skills/{apalache-symbolic,tlaps-proof,kani-conformance}/   # SKILL.md + guide.md (+ references)
-scripts/{verdict.py, apalache_check.sh, tlapm_check.sh, kani_check.sh}
+src/main.rs                                                # the host-prove binary: run ONE verifier, emit one verdict + bound
 install/{install-apalache.sh, install-tlaps.sh, install-kani.sh, _common.sh}
 tools.lock                                                 # pinned (version, asset, sha256)
-tests/                                                     # verdict.py fixtures + runner
+tests/                                                     # verdict fixtures + runner
 ```
 
 The skills are wired into a host's `.claude/skills/` by `link-skills.sh`, exactly as the

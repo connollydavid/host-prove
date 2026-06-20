@@ -1,2 +1,3 @@
 # tool binaries fetched by install/*.sh (verified against tools.lock, never committed)
 .tools/
+/target
