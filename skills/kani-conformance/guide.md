@@ -70,6 +70,13 @@ Rules that keep a weak model on the rails:
   `kani::assume(s.len() <= 8)` for strings/slices (Kani needs a finite bound; pick the
   smallest bound that still covers the real cases).
 - **One property per harness.** Split unrelated claims into separate harnesses.
+- **Keep CBMC tractable — pick the right target.** Functions that use `str::split`,
+  `String`, or `Vec` pull in `memchr` (a SIMD scan) and heap modeling, which can make
+  CBMC run for many minutes or not terminate at all. Prefer **byte-slice (`&[u8]`) or
+  char-level** predicates. If the obligation's function is `split`/`Vec`-heavy, leave it
+  on a `test:` disposition and choose a leaner function for the `kani:` proof — a proof
+  that never finishes discharges nothing. (Never reach for `unsafe`/`from_utf8_unchecked`
+  to speed it up; that hides the cost and adds risk — change the target instead.)
 - **Never `kani::any::<&str>()` or `kani::any::<String>()`** — Kani cannot make an
   unbounded string symbolic. Build a `&str` from a **bounded `[u8; N]`** of symbolic
   bytes instead. Use this exact pattern for any function taking `&str`/`&[u8]` — fill
