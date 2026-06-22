@@ -1,6 +1,6 @@
 [package]
 name = "host-prove"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 description = "Parse a verifier's raw output into one machine-matchable verdict line + bound (host-prove lane driver)"
 license = "Unlicense"
