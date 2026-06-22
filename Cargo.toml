@@ -8,3 +8,9 @@ license = "Unlicense"
 [[bin]]
 name = "host-prove"
 path = "src/main.rs"
+
+# Reproducible builds: strip symbols and the .comment section (which embed the build
+# host's toolchain/distro). Combined with --build-id=none (.cargo/config.toml), the
+# release binary carries no build-environment metadata, so it hashes the same anywhere.
+[profile.release]
+strip = true
