@@ -31,3 +31,31 @@ jobs:
         run: cargo install --git https://github.com/connollydavid/host-lifecycle --rev a04c4608465042919949bc016b2705c69db60298
       - name: Discharge obligations (every obligation dispositioned, test refs exist)
         run: host-lifecycle obligations host-prove.allium --tests src
+
+  # plan/0032: ship the certified static-musl asset. host-prove has zero third-party
+  # dependencies, so it builds offline with no bundle; the binary is built by the recorded
+  # recipe in the pinned image, so the published asset is the artifact --verify-build
+  # reproduces (distribute equals certify). Only the linux x86_64 musl asset is certified.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [verdict-parser, allium]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the certified x86_64-unknown-linux-musl asset (hermetic, offline)
+        run: |
+          docker run --rm --network none \
+            -v "$PWD":/src -w /src -e RUSTUP_TOOLCHAIN=stable \
+            clux/muslrust:1.95.0-stable@sha256:15a72a4abf1c593b0bea63a4a8f20e95c1e5a0696d7051eca87b9b850b2d7e43 \
+            sh -c 'CARGO_INCREMENTAL=0 cargo build --release --locked --offline --target x86_64-unknown-linux-musl'
+          cp target/x86_64-unknown-linux-musl/release/host-prove host-prove-linux-x86_64-musl
+      - name: Create release with the certified asset
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes \
+            host-prove-linux-x86_64-musl
