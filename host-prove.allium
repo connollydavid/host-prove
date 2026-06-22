@@ -1,0 +1,137 @@
+-- allium: 3
+-- host-prove: run ONE verifier (Kani, Apalache, or TLAPS) and settle to exactly one
+-- machine-matchable verdict that maps to an exit code. host-prove carries the verifier
+-- subprocess so a weak agent issues a single command and matches a single verdict word.
+-- It is an agent-UX and lane-runner aid, OFF the discharge trust path (call/0018):
+-- discharge is the verifier passing on re-derivation, which is exactly what this runs.
+--
+-- Scope: the run-to-verdict lifecycle and the soundness bound a PASS carries.
+-- Excludes (implementation): the CLI flag spellings, the per-tool output-string parsing,
+-- the subprocess/IO mechanics, and the exact verdict-line wording.
+
+enum Verifier {
+    kani
+    apalache
+    tlaps
+}
+
+-- The three terminal outcomes, each mapping to one exit code:
+--   proved   -> 0 (a positive verdict: SUCCESSFUL / TYPECHECK-OK / PROVEN / ALL-PROVED)
+--   refuted  -> 1 (a real negative verdict: a failed harness or a counterexample)
+--   unusable -> 2 (the verifier produced no verdict: ERROR / TYPE-ERROR)
+enum Outcome {
+    proved
+    refuted
+    unusable
+}
+
+-- The soundness footing a PASS carries (#9). A bounded tool (Kani --unwind, Apalache
+-- --length) is sound only up to a bound; TLAPS is a proof system, so unbounded. A
+-- bounded PASS with no bound supplied is recorded `unspecified`, so the consumer
+-- (obligations --prove) flags it rather than trusting an unstated bound.
+enum Bound {
+    bounded
+    unbounded
+    unspecified
+}
+
+-- One host-prove invocation: the boundary. The verdict mapping is identical whether the
+-- verifier is run live or its already-captured output is parsed (--stdin).
+entity Invocation {
+    verifier: Verifier
+}
+
+-- The single verdict a run produces. `bound` is present only on a PASS (proved); it is
+-- absent for a refuted or unusable verdict, where a soundness bound has no meaning.
+entity Verdict {
+    verifier: Verifier
+    outcome: Outcome
+    bound: Bound?
+}
+
+-- One run. Starts running; the verifier's verdict is observed; the run then settles to
+-- exactly one terminal status that maps to an exit code: proved (0), refuted (1),
+-- unusable (2). `observed` records the verdict outcome before the run settles.
+entity Run {
+    verifier: Verifier
+    observed: Outcome?
+    status: running | proved | refuted | unusable
+    transitions status {
+        running -> proved
+        running -> refuted
+        running -> unusable
+        terminal: proved, refuted, unusable
+    }
+}
+
+given {
+    run: Run
+}
+
+-- The boundary that drives host-prove: one CLI invocation. The run brackets the verifier;
+-- the Verdict arrives in between, whether the verifier is run live or parsed from --stdin.
+surface ProveRun {
+    facing invocation: Invocation
+    provides:
+        RunStarts(invocation)
+        RunCompletes(invocation)
+}
+
+rule StartRun {
+    when: RunStarts(invocation)
+    ensures: run.status = running
+}
+
+-- The verifier yields exactly one verdict; its outcome is recorded on the run.
+rule RecordVerdict {
+    when: verdict: Verdict.created
+    ensures: run.observed = verdict.outcome
+}
+
+-- On completion the recorded outcome drives the terminal status, and thereby the exit
+-- code. The three settle rules are mutually exclusive on the single recorded outcome.
+
+rule VerdictProved {
+    when: RunCompletes(invocation)
+    requires: run.status = running and run.observed = proved
+    ensures: run.status = proved
+}
+
+rule VerdictRefuted {
+    when: RunCompletes(invocation)
+    requires: run.status = running and run.observed = refuted
+    ensures: run.status = refuted
+}
+
+rule VerdictUnusable {
+    when: RunCompletes(invocation)
+    requires: run.status = running and run.observed = unusable
+    ensures: run.status = unusable
+}
+
+-- === Invariants ===
+
+-- A PASS verdict always carries a bound footing; a non-PASS carries none. The bound is
+-- meaningful only for a verdict that claims the property holds.
+invariant PassCarriesBound {
+    for v in Verdicts where v.outcome = proved:
+        v.bound != null
+}
+
+invariant NonPassHasNoBound {
+    for v in Verdicts where v.outcome != proved:
+        v.bound = null
+}
+
+-- TLAPS is the unbounded rung (a proof system): a TLAPS PASS is always unbounded.
+invariant TlapsPassIsUnbounded {
+    for v in Verdicts where v.outcome = proved and v.verifier = tlaps:
+        v.bound = unbounded
+}
+
+-- The bounded tools (Kani, Apalache) never claim unbounded soundness: a PASS carries a
+-- real bound or, absent one, `unspecified`.
+invariant BoundedToolsNeverUnbounded {
+    for v in Verdicts where v.outcome = proved and v.verifier != tlaps:
+        v.bound != unbounded
+}

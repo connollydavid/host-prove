@@ -15,3 +15,19 @@ jobs:
         run: PATH="$PWD/target/release:$PATH" sh tests/run.sh
       - name: shell syntax (installers + test runner)
         run: for f in install/*.sh tests/run.sh; do sh -n "$f"; done
+  allium:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install allium-cli (pinned 3.4.2)
+        run: cargo install allium-cli --version 3.4.2
+      - name: allium check
+        run: allium check host-prove.allium
+      - name: allium analyse
+        run: allium analyse host-prove.allium
+      - name: allium plan (test obligations)
+        run: allium plan host-prove.allium
+      - name: Install host-lifecycle (pinned)
+        run: cargo install --git https://github.com/connollydavid/host-lifecycle --rev a04c4608465042919949bc016b2705c69db60298
+      - name: Discharge obligations (every obligation dispositioned, test refs exist)
+        run: host-lifecycle obligations host-prove.allium --tests src

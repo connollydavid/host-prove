@@ -1,0 +1,41 @@
+# host-prove.obligations — disposition for every `allium plan` obligation.
+# `host-lifecycle obligations host-prove.allium --tests src` checks this is complete
+# (no obligation undispositioned, no stale entry, every test: name real).
+#   <id> => test:<name> | structural | waived: <reason>
+# structural = the spec's own `allium check`/`analyse` lane discharges it (field
+# presence, enum comparability, surface shape, declared transition graph).
+# The behavioural tests live inline in src/main.rs (#[cfg(test)] mod tests); they assert
+# the verdict line + exit code the run settles to, which is exactly what each rule models.
+
+# --- Spec-integrity (covered by the check/analyse lane) ---
+enum-comparable.Verifier             => structural
+enum-comparable.Outcome              => structural
+enum-comparable.Bound                => structural
+entity-fields.Invocation             => structural
+entity-fields.Verdict                => structural
+entity-optional.Verdict.bound        => structural
+entity-fields.Run                    => structural
+entity-optional.Run.observed         => structural
+surface-actor.ProveRun               => structural
+surface-provides.ProveRun            => structural
+transition-rejected.Run.status       => structural
+transition-terminal.Run.status       => structural
+
+# --- Verdict lifecycle (behavioural — the run settles to one exit class) ---
+transition-edge.Run.running.proved   => test:kani_success_carries_bound
+transition-edge.Run.running.refuted  => test:apalache_check_violated
+transition-edge.Run.running.unusable => test:apalache_typecheck_err_location
+rule-success.RecordVerdict           => test:kani_success_carries_bound
+rule-success.VerdictProved           => test:kani_success_carries_bound
+rule-failure.VerdictProved.1         => test:kani_failed
+rule-success.VerdictRefuted          => test:apalache_check_violated
+rule-failure.VerdictRefuted.1        => test:kani_success_carries_bound
+rule-success.VerdictUnusable         => test:apalache_typecheck_err_location
+rule-failure.VerdictUnusable.1       => test:kani_success_carries_bound
+rule-success.StartRun                => waived: lifecycle entry — a run unconditionally enters `running`; no observable assertion
+
+# --- Soundness-bound invariants (behavioural — #9, the bound a PASS carries) ---
+invariant.PassCarriesBound           => test:kani_success_unspecified_bound
+invariant.NonPassHasNoBound          => test:kani_failed
+invariant.TlapsPassIsUnbounded       => test:tlaps_allproved_unbounded
+invariant.BoundedToolsNeverUnbounded => test:apalache_check_proven_carries_bound
