@@ -10,22 +10,223 @@
 //! the only subprocess — no Rust API exists for it). Deterministic parser, fixture-tested.
 //! (Replaces the former `verdict.py` + `*_check.sh` shell wrappers — no unpinned runtime, no glue.)
 //!
-//! Run a verifier (the default — tool must be on PATH):
+//! Run a verifier (pure-local and pin-bound; the verifier must already be installed):
 //!   host-prove kani     --harness NAME [--dir CRATE] [--bound unwind=K]
 //!   host-prove apalache --mode typecheck --spec FILE
 //!   host-prove apalache --mode check     --spec FILE --inv NAME [--bound length=N]
 //!   host-prove tlaps    --module FILE.tla
+//! Install the pinned, SHA-verified verifier (the one network/filesystem verb):
+//!   host-prove install <kani|apalache|tlaps>
+//! Report each verifier's installed-vs-pinned status:  host-prove doctor
 //! Parse already-captured output instead of running (testing / piping): add `--stdin`.
 //!
-//! Vocabulary / exit (0 = proved/clean, 1 = a real negative verdict, 2 = the tool could not run):
+//! The run path never installs and binds the verifier to the embedded `tools.lock` pin: an absent or
+//! wrong-version verifier is BLOCKED (exit 2), never a pass or fail (call/0036). A live PASS carries
+//! the resolved `[<tool>=<version> pinned]`.
+//!
+//! Vocabulary / exit (0 = proved/clean, 1 = a real negative verdict, 2 = could not run / blocked):
 //!   kani      SUCCESSFUL <h> [bound=..] | FAILED <h> (replay: ..) | ERROR <h>: <msg>
 //!   apalache  TYPECHECK-OK <spec> | TYPE-ERROR <loc>: <msg>
 //!             PROVEN <inv> [bound=..] | VIOLATED <inv> (counterexample: ..) | ERROR: <msg>
-//!   tlaps     ALL-PROVED <module> (<n> obligations) [unbounded]
-//!             FAILED <module>: <k>/<n> (first: <loc>) | ERROR <module>: <msg>
+//!   tlaps     ALL-PROVED <module> (<n> obligations) [bound=unbounded]
+//!             FAILED <module>: <k>/<n> not proved (first: <loc> [<status>]) | ERROR <module>: <msg>
+//!   any       BLOCKED <tool>: <reason>; run: host-prove install <tool>   (verifier not pin-bound)
 
 use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::process::{self, Command, Output};
+
+// === Verifier provenance: install verb + pure-local pin-bound resolver (call/0036) ===
+//
+// host-prove carries its verifier pins (the analog of .host-software's recorded toolchain). The run
+// path is pure-local and NEVER installs: it resolves a verifier only from a version-stamped install
+// bound to the embedded pin, and fails closed (a BLOCKED verdict) otherwise. `host-prove install` is
+// the one verb that touches the network or filesystem. No verdict ever issues from an unbound tool.
+const TOOLS_LOCK: &str = include_str!("../tools.lock");
+
+/// The value of `<field>=` for `<tool>` in the embedded tools.lock, or None.
+fn pin(tool: &str, field: &str) -> Option<String> {
+    for line in TOOLS_LOCK.lines() {
+        let line = line.trim();
+        if line.starts_with('#') {
+            continue;
+        }
+        let mut it = line.split_whitespace();
+        if it.next() != Some(tool) {
+            continue;
+        }
+        for tok in it {
+            if let Some((k, v)) = tok.split_once('=') {
+                if k == field {
+                    return Some(v.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Where version-stamped verifier installs live (override with HOST_PROVE_TOOLS).
+fn tools_root() -> PathBuf {
+    if let Some(d) = std::env::var_os("HOST_PROVE_TOOLS") {
+        return PathBuf::from(d);
+    }
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+    home.join(".local/share/host-prove/tools")
+}
+
+/// `~/.cargo/bin`, where `cargo install` places the kani binaries.
+fn cargo_bin() -> PathBuf {
+    std::env::var_os("CARGO_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cargo")))
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("bin")
+}
+
+/// Verify `file` hashes to `want` (a 64-hex sha256), shelling sha256sum. Fail-closed: a pin that is
+/// not a full hex digest, or a mismatch, is an error and nothing is installed.
+fn verify_sha(file: &Path, want: &str) -> Result<(), String> {
+    if want.len() != 64 || !want.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(format!("no valid pinned sha256 (got '{want}') — refusing to install"));
+    }
+    let out = Command::new("sha256sum").arg(file).output().map_err(|e| format!("sha256sum: {e}"))?;
+    let got = String::from_utf8_lossy(&out.stdout);
+    let got = got.split_whitespace().next().unwrap_or("");
+    if got.eq_ignore_ascii_case(want) {
+        Ok(())
+    } else {
+        Err(format!("sha256 mismatch: got {got}, want {want}"))
+    }
+}
+
+/// Run a helper command, mapping a non-zero exit or a spawn failure to an Err with its first stderr
+/// line, so any failed install step aborts the install (fail-closed).
+fn sh_ok(cmd: &mut Command, what: &str) -> Result<(), String> {
+    match cmd.output() {
+        Ok(o) if o.status.success() => Ok(()),
+        Ok(o) => Err(format!(
+            "{what} failed: {}",
+            String::from_utf8_lossy(&o.stderr).lines().next().unwrap_or("").trim()
+        )),
+        Err(e) => Err(format!("{what}: {e}")),
+    }
+}
+
+/// `host-prove install <tool>` — the only network/filesystem verb. Fetch the pinned asset, verify its
+/// SHA256 BEFORE extracting or executing it, install into a version-stamped directory, and record the
+/// verified pin in a marker the resolver checks every run. Returns the install's bin directory. Kani
+/// is a cargo-locked source build (no asset sha); its `cargo kani setup` backend is not sha-pinned.
+fn install(tool: &str) -> Result<PathBuf, String> {
+    match tool {
+        "kani" => {
+            let ver = pin("kani", "version").ok_or("no kani version pinned")?;
+            eprintln!("host-prove: installing kani-verifier {ver} (cargo, locked) ...");
+            sh_ok(
+                Command::new("cargo").args(["install", "--locked", "kani-verifier", "--version", &ver]),
+                "cargo install kani-verifier",
+            )?;
+            sh_ok(Command::new("cargo").args(["kani", "setup"]), "cargo kani setup")?;
+            Ok(cargo_bin())
+        }
+        "apalache" | "tlaps" => {
+            let ver = pin(tool, "version").ok_or("no version pinned")?;
+            let asset = pin(tool, "asset").ok_or("no asset pinned")?;
+            let sha = pin(tool, "sha256").ok_or("no sha256 pinned")?;
+            let repo = if tool == "apalache" { "apalache-mc/apalache" } else { "tlaplus/tlapm" };
+            let url = format!("https://github.com/{repo}/releases/download/v{ver}/{asset}");
+            let dir = tools_root().join(tool).join(&ver);
+            std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir: {e}"))?;
+            let tmp = dir.join(".download");
+            eprintln!("host-prove: fetching {tool} {ver} ...");
+            sh_ok(Command::new("curl").args(["-fsSL", "--retry", "3", "-o"]).arg(&tmp).arg(&url), "curl")?;
+            if let Err(e) = verify_sha(&tmp, &sha) {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(e);
+            }
+            if tool == "apalache" {
+                sh_ok(Command::new("tar").arg("-xzf").arg(&tmp).arg("-C").arg(&dir).arg("--strip-components=1"), "tar")?;
+            } else {
+                if !cfg!(target_os = "linux") {
+                    let _ = std::fs::remove_file(&tmp);
+                    return Err("tlaps installs on Linux only".into());
+                }
+                sh_ok(Command::new("chmod").arg("+x").arg(&tmp), "chmod")?;
+                sh_ok(Command::new(&tmp).arg("-d").arg(&dir), "tlaps installer")?;
+            }
+            let _ = std::fs::remove_file(&tmp);
+            std::fs::write(dir.join(".host-prove-pin"), &sha).map_err(|e| format!("marker: {e}"))?;
+            Ok(dir.join("bin"))
+        }
+        other => Err(format!("unknown verifier {other}")),
+    }
+}
+
+/// The installed kani version via `cargo kani --version` (a local subprocess, no network).
+fn installed_kani_version() -> Option<String> {
+    let out = Command::new("cargo").args(["kani", "--version"]).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .split_whitespace()
+        .find(|t| t.chars().next().is_some_and(|c| c.is_ascii_digit()))
+        .map(str::to_string)
+}
+
+/// Resolve the pinned verifier — PURE-LOCAL, never installs, never reaches the network. Returns the
+/// (program, version) bound to the embedded pin, or Err(reason) for a BLOCKED verdict. Kani is bound
+/// by version (sha=n/a, a cargo-locked build); apalache/tlaps by the version-stamped dir + its pin
+/// marker. A PATH binary of unverifiable provenance is not consulted: it counts as not-pinned.
+fn resolve(tool: &str) -> Result<(String, String), String> {
+    match tool {
+        "kani" => {
+            let pinned = pin("kani", "version").ok_or("no kani version pinned")?;
+            match installed_kani_version() {
+                None => Err("not installed".into()),
+                Some(v) if v == pinned => Ok(("cargo".into(), pinned)),
+                Some(v) => Err(format!("pinned {pinned}, found {v}")),
+            }
+        }
+        "apalache" | "tlaps" => {
+            let exe = if tool == "apalache" { "apalache-mc" } else { "tlapm" };
+            let pinned = pin(tool, "version").ok_or("no version pinned")?;
+            let pinned_sha = pin(tool, "sha256").ok_or("no sha256 pinned")?;
+            let dir = tools_root().join(tool).join(&pinned);
+            let bin = dir.join("bin").join(exe);
+            if !bin.is_file() {
+                return Err(format!("not installed at pinned version {pinned}"));
+            }
+            let marker = std::fs::read_to_string(dir.join(".host-prove-pin")).unwrap_or_default();
+            if marker.trim() != pinned_sha {
+                return Err(format!("pin marker mismatch at version {pinned}"));
+            }
+            Ok((bin.to_string_lossy().into_owned(), pinned))
+        }
+        other => Err(format!("unknown verifier {other}")),
+    }
+}
+
+/// The BLOCKED verdict line: a verifier absent or not bound to the pin. Exit 2, never a pass/fail.
+fn blocked_line(tool: &str, reason: &str) -> String {
+    format!("BLOCKED {tool}: {reason}; run: host-prove install {tool}")
+}
+
+/// `host-prove doctor` — report each declared verifier's installed-vs-pinned status without proving.
+fn doctor() -> i32 {
+    let mut all_ready = true;
+    for tool in ["kani", "apalache", "tlaps"] {
+        match resolve(tool) {
+            Ok((_, v)) => println!("{tool}: ready (pinned {v})"),
+            Err(why) => {
+                all_ready = false;
+                let pinned = pin(tool, "version").unwrap_or_default();
+                println!("{tool}: NOT READY (pinned {pinned}): {why}; run: host-prove install {tool}");
+            }
+        }
+    }
+    if all_ready { 0 } else { 2 }
+}
 
 /// The first error-ish line, or a fallback — what to show when no verdict is recognized.
 fn first_error(lines: &[&str]) -> String {
@@ -202,39 +403,60 @@ fn run(mut cmd: Command, tool: &str) -> (Vec<String>, bool) {
     }
 }
 
-fn run_kani(harness: &str, dir: &str, bound: Option<&str>) -> (Vec<String>, bool) {
-    let mut c = Command::new("cargo");
-    c.args(["kani", "--harness", harness, "--output-format", "terse"]);
+// The verifier argv (pure, so the flag assembly is testable without running the tool). The bound is
+// validated against the tool before these run, so a bad prefix is rejected, not silently dropped.
+fn kani_args(harness: &str, bound: Option<&str>) -> Vec<String> {
+    let mut a = vec![
+        "kani".to_string(), "--harness".to_string(), harness.to_string(),
+        "--output-format".to_string(), "terse".to_string(),
+    ];
     if let Some(n) = bound.and_then(|b| b.strip_prefix("unwind=")) {
-        c.args(["--default-unwind", n]);
+        a.push("--default-unwind".to_string());
+        a.push(n.to_string());
     }
+    a
+}
+
+fn apalache_args(mode: &str, spec: &str, inv: &str, bound: Option<&str>) -> Vec<String> {
+    if mode == "typecheck" {
+        return vec!["typecheck".to_string(), spec.to_string()];
+    }
+    let mut a = vec!["check".to_string(), format!("--inv={inv}")];
+    if let Some(n) = bound.and_then(|b| b.strip_prefix("length=")) {
+        a.push(format!("--length={n}"));
+    }
+    a.push(spec.to_string());
+    a
+}
+
+fn tlaps_args(module_path: &str) -> Vec<String> {
+    vec!["--toolbox".to_string(), "0".to_string(), "0".to_string(), module_path.to_string()]
+}
+
+// `prog` is the pin-bound program the resolver returned (the program is never chosen here, and this
+// path never installs — the hard split: a run is pure-local).
+fn run_kani(prog: &str, harness: &str, dir: &str, bound: Option<&str>) -> (Vec<String>, bool) {
+    let mut c = Command::new(prog);
+    c.args(kani_args(harness, bound));
     c.current_dir(dir);
     run(c, "cargo kani")
 }
 
-fn run_apalache(mode: &str, spec: &str, inv: &str, bound: Option<&str>) -> (Vec<String>, bool) {
-    let mut c = Command::new("apalache-mc");
-    if mode == "typecheck" {
-        c.args(["typecheck", spec]);
-    } else {
-        c.arg("check").arg(format!("--inv={inv}"));
-        if let Some(n) = bound.and_then(|b| b.strip_prefix("length=")) {
-            c.arg(format!("--length={n}"));
-        }
-        c.arg(spec);
-    }
+fn run_apalache(prog: &str, mode: &str, spec: &str, inv: &str, bound: Option<&str>) -> (Vec<String>, bool) {
+    let mut c = Command::new(prog);
+    c.args(apalache_args(mode, spec, inv, bound));
     run(c, "apalache-mc")
 }
 
-fn run_tlaps(module_path: &str) -> (Vec<String>, bool) {
-    let mut c = Command::new("tlapm");
-    c.args(["--toolbox", "0", "0", module_path]);
+fn run_tlaps(prog: &str, module_path: &str) -> (Vec<String>, bool) {
+    let mut c = Command::new(prog);
+    c.args(tlaps_args(module_path));
     run(c, "tlapm")
 }
 
 fn usage() -> ! {
     eprintln!(
-        "usage: host-prove <kani --harness NAME [--dir D] | apalache --mode typecheck|check --spec F [--inv N] | tlaps --module F.tla> [--bound B] [--stdin]\n       runs the verifier and prints one verdict line; --stdin parses already-captured output instead"
+        "usage: host-prove <kani --harness NAME [--dir D] | apalache --mode typecheck|check --spec F [--inv N] | tlaps --module F.tla> [--bound B] [--stdin]\n       host-prove install <kani|apalache|tlaps>   fetch + SHA-verify + install the pinned verifier (the only network step)\n       host-prove doctor                           report each verifier's installed-vs-pinned status\n       a run is pure-local and pin-bound: an absent or wrong-version verifier is BLOCKED (exit 2), never a verdict; --stdin parses already-captured output"
     );
     process::exit(2);
 }
@@ -251,6 +473,36 @@ fn main() {
             .cloned()
     };
     let has = |flag: &str| args.iter().any(|a| a == flag);
+    let sub = args.get(1).map(String::as_str);
+
+    // The only network/filesystem verbs. `install` is the sole path that fetches and writes; a CI
+    // provisioning lane or the operator runs it deliberately. `doctor` only reads status.
+    if sub == Some("install") {
+        let tool = args.get(2).map(String::as_str).unwrap_or("");
+        if !matches!(tool, "kani" | "apalache" | "tlaps") {
+            eprintln!("usage: host-prove install <kani|apalache|tlaps>");
+            process::exit(2);
+        }
+        match install(tool) {
+            Ok(bin) => {
+                eprintln!("host-prove: {tool} ready ({})", bin.display());
+                if let Some(gp) = std::env::var_os("GITHUB_PATH") {
+                    use std::io::Write;
+                    if let Ok(mut f) = std::fs::OpenOptions::new().append(true).open(gp) {
+                        let _ = writeln!(f, "{}", bin.display());
+                    }
+                }
+                process::exit(0);
+            }
+            Err(e) => {
+                eprintln!("host-prove: install {tool} failed: {e}");
+                process::exit(2);
+            }
+        }
+    }
+    if sub == Some("doctor") {
+        process::exit(doctor());
+    }
 
     let from_stdin = has("--stdin");
     let stdin_lines = || -> Vec<String> {
@@ -260,7 +512,6 @@ fn main() {
     };
     let bound = get("--bound");
     let b = bound.as_deref();
-    let sub = args.get(1).map(String::as_str);
 
     // Validate --bound against the verifier, so a malformed or misplaced bound is rejected rather
     // than dropped at the tool yet recorded verbatim on the PASS (which would over-claim coverage).
@@ -276,13 +527,35 @@ fn main() {
         }
     }
 
+    // Pure-local pin-binding: resolve the verifier against the embedded pin before running it. An
+    // absent or unbound verifier fails closed to a BLOCKED verdict (exit 2), never a pass or fail,
+    // and this path never installs. A --stdin run parses captured output, so it resolves nothing.
+    let resolved: Option<(String, String)> = if from_stdin {
+        None
+    } else {
+        match sub {
+            Some("kani") | Some("apalache") | Some("tlaps") => {
+                let tool = sub.unwrap();
+                match resolve(tool) {
+                    Ok(rv) => Some(rv),
+                    Err(why) => {
+                        println!("{}", blocked_line(tool, &why));
+                        process::exit(2);
+                    }
+                }
+            }
+            _ => None,
+        }
+    };
+    let prog = resolved.as_ref().map(|(p, _)| p.as_str());
+
     let (owned, live_clean): (Vec<String>, Option<bool>) = match sub {
         Some("kani") => {
             let h = get("--harness").unwrap_or_else(|| usage());
             if from_stdin {
                 (stdin_lines(), None)
             } else {
-                let (l, ok) = run_kani(&h, &get("--dir").unwrap_or_else(|| ".".into()), b);
+                let (l, ok) = run_kani(prog.unwrap(), &h, &get("--dir").unwrap_or_else(|| ".".into()), b);
                 (l, Some(ok))
             }
         }
@@ -297,7 +570,7 @@ fn main() {
             if from_stdin {
                 (stdin_lines(), None)
             } else {
-                let (l, ok) = run_apalache(&mode, &spec, &inv, b);
+                let (l, ok) = run_apalache(prog.unwrap(), &mode, &spec, &inv, b);
                 (l, Some(ok))
             }
         }
@@ -306,7 +579,7 @@ fn main() {
             if from_stdin {
                 (stdin_lines(), None)
             } else {
-                let (l, ok) = run_tlaps(&m);
+                let (l, ok) = run_tlaps(prog.unwrap(), &m);
                 (l, Some(ok))
             }
         }
@@ -330,6 +603,14 @@ fn main() {
     if live_clean == Some(false) && code == 0 {
         line = "ERROR: the verifier exited abnormally; its output parsed as a pass and is not trusted".to_string();
         code = 2;
+    }
+
+    // Provenance: a live PASS carries the resolved, pin-bound verifier version, so a glance or a cold
+    // read confirms the pinned tool produced the verdict.
+    if code == 0 {
+        if let (Some(t), Some((_, v))) = (sub, resolved.as_ref()) {
+            line = format!("{line} [{t}={v} pinned]");
+        }
     }
 
     println!("{line}");
@@ -485,5 +766,48 @@ mod tests {
         for v in [kf, av, tf] {
             assert!(!v.contains("[bound"), "{v}");
         }
+    }
+
+    #[test]
+    fn pin_reads_the_embedded_tools_lock() {
+        assert_eq!(pin("apalache", "version").as_deref(), Some("0.58.0"));
+        assert!(pin("apalache", "sha256").is_some_and(|s| s.len() == 64));
+        assert_eq!(pin("kani", "version").as_deref(), Some("0.67.0"));
+        assert_eq!(pin("kani", "sha256").as_deref(), Some("n/a"));
+        assert!(pin("nope", "version").is_none());
+    }
+
+    #[test]
+    fn argv_builders_assemble_the_right_flags() {
+        let join = |v: Vec<String>| v.join(" ");
+        assert_eq!(join(kani_args("h", Some("unwind=20"))), "kani --harness h --output-format terse --default-unwind 20");
+        assert_eq!(join(kani_args("h", None)), "kani --harness h --output-format terse");
+        assert_eq!(join(apalache_args("typecheck", "S.tla", "I", None)), "typecheck S.tla");
+        assert_eq!(join(apalache_args("check", "S.tla", "Inv", Some("length=12"))), "check --inv=Inv --length=12 S.tla");
+        assert_eq!(join(tlaps_args("M.tla")), "--toolbox 0 0 M.tla");
+    }
+
+    #[test]
+    fn verify_sha_requires_a_full_hex_digest() {
+        // not a 64-hex digest -> refused (fail-closed); also covers the kani `n/a` sentinel.
+        assert!(verify_sha(Path::new("/etc/hostname"), "n/a").is_err());
+        assert!(verify_sha(Path::new("/etc/hostname"), "").is_err());
+        assert!(verify_sha(Path::new("/etc/hostname"), "abc").is_err());
+    }
+
+    #[test]
+    fn resolve_blocks_an_uninstalled_pinned_verifier() {
+        // Point the install root at a path with no install: resolve must fail closed (no network).
+        std::env::set_var("HOST_PROVE_TOOLS", "/nonexistent-host-prove-tools-9e1");
+        assert!(resolve("apalache").is_err());
+        assert!(resolve("tlaps").is_err());
+        std::env::remove_var("HOST_PROVE_TOOLS");
+    }
+
+    #[test]
+    fn blocked_line_names_the_install_command() {
+        let l = blocked_line("apalache", "not installed at pinned version 0.58.0");
+        assert!(l.starts_with("BLOCKED apalache:"), "{l}");
+        assert!(l.contains("run: host-prove install apalache"), "{l}");
     }
 }
