@@ -32,9 +32,10 @@ buffers may exceed Apalache — if `--length` cannot be made meaningful, say so 
 |---|---|---|
 | `TYPECHECK-OK <spec>` | Snowcat types check; ready to `check` | 0 |
 | `TYPE-ERROR <loc>: <msg>` | A `@type:` annotation is missing/wrong at `<loc>` | 2 |
-| `PROVEN <inv>` | No violation up to `--length` — symbolic, so holds for all parameter values | 0 |
-| `VIOLATED <inv> (counterexample: <file>)` | Apalache found a violating run | 1 |
-| `ERROR: <msg>` | Apalache could not run | 2 |
+| `PROVEN <inv> [bound=…] [apalache=<v> pinned]` | No violation up to `--length`, by the pinned apalache — symbolic, so holds for all parameter values | 0 |
+| `VIOLATED <inv> (counterexample: <file>)` | Apalache found a violating run (or a deadlock) | 1 |
+| `ERROR: <msg>` | Apalache ran but produced no verdict | 2 |
+| `BLOCKED apalache: <reason>` | Apalache is absent or not the pinned version: run `host-prove install apalache` | 2 |
 
 ## Procedure
 
@@ -68,8 +69,9 @@ diameter; start at 10 and raise if the property is deep). `--cinit` sets symboli
 
 | Verdict | Do |
 |---|---|
-| `PROVEN` | Go to Step 4 (wire it). The invariant holds symbolically up to `--length`. |
-| `VIOLATED (counterexample: <file>)` | Classify it (table below). |
+| `PROVEN` | The invariant holds symbolically up to `--length`. If the verdict shows `[bound=unspecified]`, supply `--bound length=<N>` and re-run, or record it as flagged. Then go to Step 4 (wire it). |
+| `VIOLATED (counterexample: <file>)` | Classify it (table below). A `deadlock` counterexample is a real negative too. |
+| `BLOCKED apalache: <reason>` | Apalache is not installed at the pinned version. Run `host-prove install apalache`, then re-run Step 2. Never a pass or fail; do not touch the spec. |
 | `ERROR: …` | Fix what the message names, or the property is out of scope. If unsure, STOP. |
 
 **Counterexample classification** (the specula convention — every counterexample is exactly one):

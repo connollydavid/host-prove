@@ -31,9 +31,10 @@ the filesystem, threads, or unbounded loops is **out of scope** — say so and s
 
 | Verdict | Meaning | Exit |
 |---|---|---|
-| `SUCCESSFUL <harness>` | Proved for all inputs in the harness's bounds | 0 |
+| `SUCCESSFUL <harness> [bound=…] [kani=<v> pinned]` | Proved for all inputs in the harness's bounds, by the pinned kani | 0 |
 | `FAILED <harness> (replay: …)` | A counterexample exists | 1 |
-| `ERROR <harness>: <msg>` | Kani could not run (build error, unwind bound, unsupported) | 2 |
+| `ERROR <harness>: <msg>` | Kani ran but produced no verdict (build error, unwind bound, unsupported) | 2 |
+| `BLOCKED kani: <reason>` | Kani is absent or not the pinned version: run `host-prove install kani` | 2 |
 
 ## Procedure
 
@@ -100,15 +101,17 @@ Rules that keep a weak model on the rails:
 host-prove kani --harness <harness_name> --dir <crate-dir>
 ```
 
-`host-prove` runs `cargo kani` itself and prints one verdict line — you never pipe or
-parse. (Optional bound: `--bound unwind=<K>`.)
+`host-prove` runs the pinned `cargo kani` itself and prints one verdict line; you never pipe or
+parse. **Supply the bound** (`--bound unwind=<K>`): a trustworthy proof states the bound it holds to.
+Omit it and the verdict reads `[bound=unspecified]`, which a consumer must flag, not trust.
 
 ### Step 4 — Act on the verdict (do exactly this)
 
 | Verdict | Do |
 |---|---|
-| `SUCCESSFUL` | Go to Step 5 (wire it). Done — the property holds. |
+| `SUCCESSFUL` | The property holds for the stated bound. If the verdict shows `[bound=unspecified]`, the coverage is unstated: supply `--bound unwind=<K>` and re-run, or record it as flagged. Then go to Step 5 (wire it). |
 | `FAILED (replay: <cmd>)` | The code (or your contract) is wrong. Run `<cmd>` to print a replay unit test; add it to the crate's tests as a regression; report the counterexample to the user. **STOP. Do NOT weaken `assert!` or loosen `assume` to force a pass** — that hides the bug. |
+| `BLOCKED kani: <reason>` | Kani is not installed at the pinned version. Run `host-prove install kani`, then re-run Step 3. This is never a pass or a fail; do not touch the harness. |
 | `ERROR: …unwind…` | Loop bound too low — see the fix table. Re-run Step 3. |
 | `ERROR: …` (other) | Fix the build error the message names, or the property is out of scope (Step "When this lane applies"). If unsure, STOP and report. |
 

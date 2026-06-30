@@ -29,9 +29,10 @@ genuinely must-hold-for-all properties.
 
 | Verdict | Meaning | Exit |
 |---|---|---|
-| `ALL-PROVED <module> (<n> obligations)` | Every proof obligation discharged | 0 |
-| `FAILED <module>: <k>/<n> (first: <loc>)` | `<k>` obligations did not prove; first at `<loc>` | 1 |
-| `ERROR <module>: <msg>` | `tlapm` could not run, or the module has no obligations | 2 |
+| `ALL-PROVED <module> (<n> obligations) [bound=unbounded]` | Every obligation discharged (only `proved`/`trivial` count), by the pinned tlaps | 0 |
+| `FAILED <module>: <k>/<n> not proved (first: <loc> [<status>])` | `<k>` obligations did not prove (`failed`, `omitted`, `missing`, …); first at `<loc>` | 1 |
+| `ERROR <module>: <msg>` | `tlapm` ran but produced no verdict, or the module has no obligations | 2 |
+| `BLOCKED tlaps: <reason>` | tlaps is absent or not the pinned version: run `host-prove install tlaps` | 2 |
 
 ## Procedure (MAINTAIN)
 
@@ -46,7 +47,8 @@ host-prove tlaps --module <module.tla>
 | Verdict | Do |
 |---|---|
 | `ALL-PROVED` | Go to Step 3 (wire it). The theorem holds. |
-| `FAILED … (first: <loc>)` | Report to the user: name the module, the failing count, and `<loc>`. If you arrived here **after editing the spec**, the edit broke a proof — say which edit and STOP; the proof must be repaired by a strong model. Do **not** add `OMITTED`/`ADMIT` to force a pass. |
+| `FAILED … not proved (first: <loc> [<status>])` | An obligation did not prove. The `[<status>]` names why (`failed`, or an `omitted`/`missing`/admitted step that the allowlist correctly refuses to count as proved). Report to the user: the module, the count, `<loc>`, and the status. If you arrived here **after editing the spec**, the edit broke a proof — say which edit and STOP; repair is strong-model work. Do **not** add `OMITTED`/`ADMIT` to force a pass (the parser would still refuse it). |
+| `BLOCKED tlaps: <reason>` | tlaps is not installed at the pinned version. Run `host-prove install tlaps`, then re-run Step 1. Never a pass or fail; do not touch the proof. |
 | `ERROR: no obligations` | The module has no `PROOF` blocks — there is nothing to check. Authoring is needed → hand off (strong model). |
 | `ERROR: …` (other) | Fix what the message names (a missing module on the path, a parse error). If unclear, STOP and report. |
 
@@ -54,8 +56,9 @@ host-prove tlaps --module <module.tla>
 
 1. Disposition the obligation `<id> => tlaps:<theorem>` in the `<spec>.obligations` manifest.
 2. Ensure CI runs `tlapm` on the module (a declared `tlaps:` disposition with no TLAPS lane
-   is a HAZARD under `host-lifecycle software --check`). TLAPS is verified in the **CI OS
-   matrix** using the official prebuilt installer — not Docker, not a local OCaml build.
+   is a HAZARD under `host-lifecycle software --check`). Install tlaps with `host-prove install
+   tlaps` (the official prebuilt installer, Linux only; not Docker, not a local OCaml build); a CI
+   provisioning lane runs the install deliberately, then `tlapm`.
 
 ## Reading a proof (orientation only — authoring is strong-model work)
 
