@@ -22,20 +22,23 @@ transition-rejected.Run.status       => structural
 transition-terminal.Run.status       => structural
 
 # --- Verdict lifecycle (behavioural — the run settles to one exit class) ---
-transition-edge.Run.running.proved   => test:kani_success_carries_bound
-transition-edge.Run.running.refuted  => test:apalache_check_violated
-transition-edge.Run.running.unusable => test:apalache_typecheck_err_location
-rule-success.RecordVerdict           => test:kani_success_carries_bound
-rule-success.VerdictProved           => test:kani_success_carries_bound
-rule-failure.VerdictProved.1         => test:kani_failed
-rule-success.VerdictRefuted          => test:apalache_check_violated
-rule-failure.VerdictRefuted.1        => test:kani_success_carries_bound
-rule-success.VerdictUnusable         => test:apalache_typecheck_err_location
-rule-failure.VerdictUnusable.1       => test:kani_success_carries_bound
+# Each test carries an `exercises=` link to the parser it drives, so the discharge check (run under
+# --strict-discharge in CI) confirms the test exercises the rule rather than only resolving its name.
+# host-prove's tests are white-box over the parsers, so the link binds directly (plan/0052, plan/0054).
+transition-edge.Run.running.proved   => test:kani_success_carries_bound exercises=parse_kani
+transition-edge.Run.running.refuted  => test:apalache_check_violated exercises=parse_apalache
+transition-edge.Run.running.unusable => test:apalache_typecheck_err_location exercises=parse_apalache
+rule-success.RecordVerdict           => test:kani_success_carries_bound exercises=parse_kani
+rule-success.VerdictProved           => test:kani_success_carries_bound exercises=parse_kani
+rule-failure.VerdictProved.1         => test:kani_failed exercises=parse_kani
+rule-success.VerdictRefuted          => test:apalache_check_violated exercises=parse_apalache
+rule-failure.VerdictRefuted.1        => test:kani_success_carries_bound exercises=parse_kani
+rule-success.VerdictUnusable         => test:apalache_typecheck_err_location exercises=parse_apalache
+rule-failure.VerdictUnusable.1       => test:kani_success_carries_bound exercises=parse_kani
 rule-success.StartRun                => waived: lifecycle entry — a run unconditionally enters `running`; no observable assertion
 
 # --- Soundness-bound invariants (behavioural — #9, the bound a PASS carries) ---
-invariant.PassCarriesBound           => test:kani_success_unspecified_bound
-invariant.NonPassHasNoBound          => test:kani_failed
-invariant.TlapsPassIsUnbounded       => test:tlaps_allproved_unbounded
-invariant.BoundedToolsNeverUnbounded => test:apalache_check_proven_carries_bound
+invariant.PassCarriesBound           => test:kani_success_unspecified_bound exercises=parse_kani
+invariant.NonPassHasNoBound          => test:nonpass_carries_no_bound exercises=parse_kani,parse_apalache,parse_tlaps
+invariant.TlapsPassIsUnbounded       => test:tlaps_allproved_unbounded exercises=parse_tlaps
+invariant.BoundedToolsNeverUnbounded => test:apalache_check_proven_carries_bound exercises=parse_apalache

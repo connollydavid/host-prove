@@ -31,7 +31,7 @@ run apalache_typecheck_err.txt 2 "TYPE-ERROR 42:10-42:24:"                 -- ap
 run apalache_check_noerror.txt 0 "PROVEN ScanEquiv"                        -- apalache --mode check --inv ScanEquiv
 run apalache_check_error.txt  1 "VIOLATED ScanEquiv (counterexample:"      -- apalache --mode check --inv ScanEquiv
 run tlaps_allproved.txt       0 "ALL-PROVED ParallelScan (2 obligations)"  -- tlaps --module ParallelScan
-run tlaps_failed.txt          1 "FAILED ParallelScan: 1/2 (first: 21:1:21:30)" -- tlaps --module ParallelScan
+run tlaps_failed.txt          1 "FAILED ParallelScan: 1/2 not proved (first: 21:1:21:30" -- tlaps --module ParallelScan
 
 echo "----"
 printf '%d passed, %d failed\n' "$pass" "$fail"
