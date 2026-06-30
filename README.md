@@ -38,23 +38,28 @@ to the right verdict with no verifier installed. (Authoring a *new* TLAPS proof 
 `tlaps-proof` skill scopes a weak model to running and maintaining existing proofs and
 flags authoring as strong-model work.)
 
-## Reproducible install — like our Rust
+## Install: a separate, pin-bound verb
 
-`install/*.sh` pin each tool to an exact version in `tools.lock` and expose it on PATH.
-Apalache and TLAPS are **official prebuilt binaries**, SHA256-verified against `tools.lock`;
-**Kani is a cargo-locked source build** (`cargo install --locked`, `sha256=n/a`) — not a
-SHA256-verified binary. No Docker, no OCaml build. Re-running reproduces the identical
-verified install — the analog of `.host-software`'s digest-pinned toolchain. The tools are
-cross-platform enough to gate via a CI OS matrix (Apalache + Kani on ubuntu/macos;
-Apalache also windows; TLAPS on its Linux prebuilt installer).
+`host-prove install <kani|apalache|tlaps>` is the one verb that touches the network or the filesystem.
+It reads the embedded `tools.lock` pins, fetches the asset, SHA256-verifies it before extracting or
+executing it, and installs into a version-stamped directory. Apalache and TLAPS are official prebuilt
+binaries verified against the pin; Kani is a cargo-locked source build (`cargo install --locked`,
+`sha256=n/a`), so its bind is the version, not a binary hash. No Docker, no OCaml build.
+
+A run never installs. It is pure-local and binds the verifier to the embedded pin before running it:
+an absent or wrong-version verifier is `BLOCKED` (exit 2) and names `host-prove install <tool>`, never
+a pass or a fail (`call/0036`). A pin bump moves the version-stamped lookup path, so the old version is
+never silently reused. `host-prove doctor` reports each verifier's installed-versus-pinned status
+without running a proof. A sandbox or hermetic build runs the pure-local path; a connected operator or
+a CI provisioning lane runs `install` deliberately (CI machine-verifies the install path against the
+pin in the `install-smoke` job).
 
 ## Layout
 
 ```
 skills/{apalache-symbolic,tlaps-proof,kani-conformance}/   # SKILL.md + guide.md (+ references)
-src/main.rs                                                # the host-prove binary: run ONE verifier, emit one verdict + bound
-install/{install-apalache.sh, install-tlaps.sh, install-kani.sh, _common.sh}
-tools.lock                                                 # pinned (version, asset, sha256)
+src/main.rs                                                # the binary: install/resolve/run ONE verifier, emit one verdict + bound
+tools.lock                                                 # the embedded pins (version, asset, sha256)
 tests/                                                     # verdict fixtures + runner
 ```
 

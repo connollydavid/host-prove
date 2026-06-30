@@ -19,8 +19,33 @@ jobs:
         run: cargo build --release --locked
       - name: fixtures map to the right verdict via the built binary
         run: PATH="$PWD/target/release:$PATH" sh tests/run.sh
-      - name: shell syntax (installers + test runner)
-        run: for f in install/*.sh tests/run.sh; do sh -n "$f"; done
+      - name: shell syntax (test runner)
+        run: sh -n tests/run.sh
+  # Machine-verify the install -> SHA -> resolve path (call/0036): a clean runner installs the pinned
+  # apalache and `doctor` must then report it ready and pin-bound. This is the provenance check the
+  # former syntax-only lane lacked; it is the one job that touches the network, as the design intends.
+  install-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: build host-prove
+        run: cargo build --release --locked
+      - name: doctor reports nothing installed on a clean runner (fail-closed)
+        run: |
+          out=$(PATH="$PWD/target/release:$PATH" host-prove doctor || true)
+          echo "$out"
+          echo "$out" | grep -q "apalache: NOT READY"
+      - name: install the pinned apalache (fetch + SHA-verify + version-stamped install)
+        run: PATH="$PWD/target/release:$PATH" host-prove install apalache
+      - name: doctor now reports apalache ready and pin-bound
+        run: |
+          out=$(PATH="$PWD/target/release:$PATH" host-prove doctor || true)
+          echo "$out"
+          echo "$out" | grep -q "apalache: ready"
   allium:
     runs-on: ubuntu-latest
     steps:
