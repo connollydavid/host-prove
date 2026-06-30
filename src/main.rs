@@ -100,6 +100,21 @@ fn verify_sha(file: &Path, want: &str) -> Result<(), String> {
     }
 }
 
+/// The sha256 (lowercase hex) of a file, shelling sha256sum. Used to bind the extracted verifier
+/// binary to its install: recorded at install, re-checked on every run, so a binary swapped in place
+/// after install cannot answer for the pin (a per-run content bind, not an install-time stamp).
+fn file_sha(path: &Path) -> Result<String, String> {
+    let out = Command::new("sha256sum").arg(path).output().map_err(|e| format!("sha256sum: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("sha256sum failed for {}", path.display()));
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .split_whitespace()
+        .next()
+        .map(str::to_string)
+        .ok_or_else(|| "empty sha256sum output".to_string())
+}
+
 /// Run a helper command, mapping a non-zero exit or a spawn failure to an Err with its first stderr
 /// line, so any failed install step aborts the install (fail-closed).
 fn sh_ok(cmd: &mut Command, what: &str) -> Result<(), String> {
@@ -155,7 +170,12 @@ fn install(tool: &str) -> Result<PathBuf, String> {
                 sh_ok(Command::new(&tmp).arg("-d").arg(&dir), "tlaps installer")?;
             }
             let _ = std::fs::remove_file(&tmp);
-            std::fs::write(dir.join(".host-prove-pin"), &sha).map_err(|e| format!("marker: {e}"))?;
+            // Record the sha of the EXTRACTED binary host-prove will execute, not the asset's — so the
+            // per-run resolve re-hashes the bytes that actually run (the asset sha was verified above,
+            // before extraction; this binds the run).
+            let exe = if tool == "apalache" { "apalache-mc" } else { "tlapm" };
+            let binsha = file_sha(&dir.join("bin").join(exe))?;
+            std::fs::write(dir.join(".host-prove-pin"), &binsha).map_err(|e| format!("marker: {e}"))?;
             Ok(dir.join("bin"))
         }
         other => Err(format!("unknown verifier {other}")),
@@ -191,15 +211,16 @@ fn resolve(tool: &str) -> Result<(String, String), String> {
         "apalache" | "tlaps" => {
             let exe = if tool == "apalache" { "apalache-mc" } else { "tlapm" };
             let pinned = pin(tool, "version").ok_or("no version pinned")?;
-            let pinned_sha = pin(tool, "sha256").ok_or("no sha256 pinned")?;
             let dir = tools_root().join(tool).join(&pinned);
             let bin = dir.join("bin").join(exe);
             if !bin.is_file() {
                 return Err(format!("not installed at pinned version {pinned}"));
             }
-            let marker = std::fs::read_to_string(dir.join(".host-prove-pin")).unwrap_or_default();
-            if marker.trim() != pinned_sha {
-                return Err(format!("pin marker mismatch at version {pinned}"));
+            // Per-run content bind: the executed binary must still hash to what install recorded.
+            let recorded = std::fs::read_to_string(dir.join(".host-prove-pin")).unwrap_or_default();
+            let got = file_sha(&bin).map_err(|e| format!("cannot hash the installed binary: {e}"))?;
+            if got != recorded.trim() {
+                return Err(format!("installed binary does not match its recorded sha at version {pinned}"));
             }
             Ok((bin.to_string_lossy().into_owned(), pinned))
         }
@@ -217,7 +238,11 @@ fn doctor() -> i32 {
     let mut all_ready = true;
     for tool in ["kani", "apalache", "tlaps"] {
         match resolve(tool) {
-            Ok((_, v)) => println!("{tool}: ready (pinned {v})"),
+            Ok((_, v)) => {
+                // kani's bind is version-only (sha n/a) with an unverified setup backend; say so.
+                let note = if tool == "kani" { format!("version {v}, backend unverified") } else { format!("pinned {v}") };
+                println!("{tool}: ready ({note})");
+            }
             Err(why) => {
                 all_ready = false;
                 let pinned = pin(tool, "version").unwrap_or_default();
@@ -609,7 +634,10 @@ fn main() {
     // read confirms the pinned tool produced the verdict.
     if code == 0 {
         if let (Some(t), Some((_, v))) = (sub, resolved.as_ref()) {
-            line = format!("{line} [{t}={v} pinned]");
+            // kani is bound by version only (cargo-locked, sha n/a) and its setup-fetched backend is
+            // not hash-pinned, so its provenance claims strictly less than apalache/tlaps' version+hash bind.
+            let bind = if t == "kani" { "version-pinned, backend unverified" } else { "pinned" };
+            line = format!("{line} [{t}={v} {bind}]");
         }
     }
 

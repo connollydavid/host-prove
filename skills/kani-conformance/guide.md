@@ -31,7 +31,7 @@ the filesystem, threads, or unbounded loops is **out of scope** — say so and s
 
 | Verdict | Meaning | Exit |
 |---|---|---|
-| `SUCCESSFUL <harness> [bound=…] [kani=<v> pinned]` | Proved for all inputs in the harness's bounds, by the pinned kani | 0 |
+| `SUCCESSFUL <harness> [bound=…] [kani=<v> version-pinned, backend unverified]` | Proved for all inputs in the bounds; kani is version-locked (cargo, sha n/a) and its setup backend is not hash-verified | 0 |
 | `FAILED <harness> (replay: …)` | A counterexample exists | 1 |
 | `ERROR <harness>: <msg>` | Kani ran but produced no verdict (build error, unwind bound, unsupported) | 2 |
 | `BLOCKED kani: <reason>` | Kani is absent or not the pinned version: run `host-prove install kani` | 2 |

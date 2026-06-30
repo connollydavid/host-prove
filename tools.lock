@@ -3,9 +3,17 @@
 # Apalache and TLAPS install/ scripts fetch the pinned OFFICIAL prebuilt binary and
 # verify its SHA256 against this file before exposing it; re-running reproduces the
 # identical verified binary — the host-prove analog of .host-software's digest-pinned
-# toolchain. Kani is the exception: a cargo-locked SOURCE build (`cargo install
-# --locked`, sha256=n/a), reproducible by its lockfile, NOT a SHA256-verified prebuilt.
-# No Docker, no OCaml build.
+# toolchain. host-prove records each extracted binary's own sha at install and re-checks
+# it every run, so a swapped binary is caught, not just the download.
+#
+# Kani is the exception, and the residual provenance edge: a cargo-locked SOURCE build
+# (`cargo install --locked kani-verifier --version <v>`, sha256=n/a), reproducible by its
+# lockfile but NOT a SHA256-verified prebuilt. Worse, `cargo kani setup` then downloads the
+# verdict-producing backend (the CBMC + solver bundle) over the network with NO sha pin —
+# the one artifact that actually emits SUCCESSFUL/FAILED is version-coupled to the locked
+# crate, not hash-verified. A kani verdict is therefore version-pinned, backend-unverified;
+# host-prove's verdict line and `doctor` say exactly that, and never claim kani is "pinned"
+# the way apalache/tlaps are. No Docker, no OCaml build.
 #
 # Fields: <tool>  version=<v>  asset=<release-asset>  sha256=<hex>  (kani: install=cargo-locked)
 apalache  version=0.58.0  asset=apalache-0.58.0.tgz                    sha256=55b4da129140b3b6b4106b31eddf36b5f49d896bf2ec8b4cf81c93bc37b9b3d7
