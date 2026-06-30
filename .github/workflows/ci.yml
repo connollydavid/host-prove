@@ -60,7 +60,7 @@ jobs:
         run: allium plan host-prove.allium
       - name: Install host-lifecycle (pinned)
         run: cargo install --git https://github.com/connollydavid/host-lifecycle --rev d4ce47e142a25568b549e0d6995936fdbb8f137b
-      - name: Discharge obligations (strict: every obligation's test exercises its rule, not just name-resolves)
+      - name: Discharge obligations (strict; every obligation's test exercises its rule, not just name-resolves)
         run: host-lifecycle obligations host-prove.allium --tests src --strict-discharge
 
   # plan/0032: ship the certified static-musl asset. host-prove has zero third-party
